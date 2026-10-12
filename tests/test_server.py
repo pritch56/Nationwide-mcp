@@ -131,8 +131,8 @@ def test_only_read_only_tools_are_exposed_and_server_info_has_the_package_versio
     assert all(t.annotations.read_only_hint is True and t.annotations.destructive_hint is False for t in tools)
     forbidden = ("pay", "transfer", "send", "initiate", "create", "delete", "update")
     assert not any(word in t.name for t in tools for word in forbidden)
-    assert info.version == version("uk-bank-mcp-nationwide")
-    assert USER_AGENT == f"nationwide-mcp/{version('uk-bank-mcp-nationwide')}"  # one User-Agent everywhere
+    assert info.version == version("nationwide-mcp")
+    assert USER_AGENT == f"nationwide-mcp/{version('nationwide-mcp')}"  # one User-Agent everywhere
 
 
 def test_tool_calls_return_structured_data(stub):

@@ -14,12 +14,12 @@ shape. It has no payment tool of any kind and never logs in to online banking wi
 (no screen scraping). Data comes from an Open Banking aggregator that you sign up to yourself, or from
 statement files that you download yourself.
 
-> **Status: alpha, never run against a live API.** Everything here was written from public
-> documentation and is tested only against mocked HTTP, a local fake TrueLayer server and synthetic
-> statement files. No real Nationwide data has been fetched with it. Expect to find differences on
-> first contact with the real services; the specific assumptions that have not been checked are
-> listed under [Unverified assumptions](#unverified-assumptions). Verify amounts and signs against
-> your banking app before relying on anything.
+> **Status: alpha.** The author runs it against their own live Nationwide accounts through the
+> TrueLayer provider for a weekly read-only sync, and it has had no wider use. The Enable Banking and
+> Lunch Flow providers have never been run against the real services, and the automated tests use
+> only mocked HTTP, a local fake TrueLayer server and synthetic statement files. The assumptions
+> listed under [Unverified assumptions](#unverified-assumptions) have not been confirmed one by one.
+> Verify amounts and signs against your banking app before relying on anything.
 
 **Before you use it:** unofficial and not affiliated with Nationwide or any aggregator; read-only;
 for **your own accounts only** (giving other people access to bank data is a regulated activity in

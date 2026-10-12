@@ -1,5 +1,5 @@
 [project]
-name = "uk-bank-mcp-nationwide"
+name = "nationwide-mcp"
 version = "0.1.0"
 description = "Unofficial read-only MCP server for Nationwide Building Society (UK) account data via TrueLayer, Lunch Flow, Enable Banking or statement files"
 readme = "README.md"

@@ -3,9 +3,10 @@
 All notable changes are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/)
 and the project aims to follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-10-12
 
-First public version. Alpha: tested against mocks and local fakes only, never against a live API.
+First public version. Alpha: the automated tests use mocks and local fakes only; the author also runs
+the TrueLayer provider against their own live accounts.
 
 ### Tools
 
