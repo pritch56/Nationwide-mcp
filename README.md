@@ -1,5 +1,13 @@
 # nationwide-mcp
 
+[![CI](https://github.com/pritch56/Nationwide-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/pritch56/Nationwide-mcp/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#unverified-assumptions)
+
+**Ask Claude (or any MCP client) about your own Nationwide Building Society accounts, balances and
+transactions, through a server that can only read.**
+
 An **unofficial**, **read-only** [Model Context Protocol](https://modelcontextprotocol.io) server for
 Nationwide Building Society (UK) account data: accounts, balances and transactions in one normalised
 shape. It has no payment tool of any kind and never logs in to online banking with your credentials
@@ -13,26 +21,223 @@ statement files that you download yourself.
 > listed under [Unverified assumptions](#unverified-assumptions). Verify amounts and signs against
 > your banking app before relying on anything.
 
-## Disclaimer
-
-- This project is **not affiliated with, endorsed by or supported by** Nationwide Building Society,
-  TrueLayer, Lunch Flow or Enable Banking. All trademarks belong to their owners.
-- It is provided **as is, without warranty of any kind**. It is not financial advice.
-- **You must register your own API client** with whichever provider you use and comply with that
-  provider's terms. Whether TrueLayer offers Live (real bank) access to private individuals is
-  **unconfirmed**: read the TrueLayer Console terms yourself. Enable Banking's free "restricted" mode
-  is for your own accounts only. Lunch Flow's terms have not been reviewed.
-- It is for **your own accounts only**. Do not host it for other people: giving third parties access
-  to bank data is a regulated activity in the UK.
+**Before you use it:** unofficial and not affiliated with Nationwide or any aggregator; read-only;
+for **your own accounts only** (giving other people access to bank data is a regulated activity in
+the UK); you must follow your provider's terms; no warranty and not financial advice. The full text
+is under [Disclaimer](#disclaimer) and [Security](#security).
 
 ## Contents
 
-[Providers](#providers) · [Quick start](#quick-start) · [Linking the bank](#linking-the-bank) ·
-[Running](#running) · [MCP client configuration](#mcp-client-configuration) ·
-[Configuration](#configuration) · [Tools](#tools) · [Do not lose transactions](#do-not-lose-transactions-overlapping-windows) ·
-[Errors](#errors) · [Tokens](#tokens-truelayer) · [Limitations](#limitations) ·
-[Unverified assumptions](#unverified-assumptions) · [Security](#security) ·
-[Troubleshooting](#troubleshooting) · [Development](#development)
+[What you can ask](#what-you-can-ask) · [60-second quick start](#60-second-quick-start) ·
+[MCP client configuration](#mcp-client-configuration) · [Tools](#tools) ·
+[Do not lose transactions](#do-not-lose-transactions-overlapping-windows) · [Providers](#providers) ·
+[Connecting your real accounts](#connecting-your-real-accounts) · [Running](#running) ·
+[Configuration](#configuration) · [Disclaimer](#disclaimer) · [Security](#security) ·
+[Limitations](#limitations) · [Unverified assumptions](#unverified-assumptions) · [Errors](#errors) ·
+[Tokens](#tokens-truelayer) · [Troubleshooting](#troubleshooting) · [Development](#development)
+
+## What you can ask
+
+The server gives the model four read-only tools (accounts, balance, transactions, connection
+status). The model does the arithmetic and the summarising. Prompts that these tools support:
+
+- "Which Nationwide accounts can you see, and what is the balance on each?"
+- "List everything that left my current account between 1 and 31 October and total it by
+  description."
+- "What were my five largest payments last month, and did any direct debit change amount compared
+  with the month before?"
+- "Is my bank connection still working, and when does the consent expire?"
+- "Are there any pending card payments that have not settled yet?" (aggregator providers only:
+  statement files contain booked transactions only)
+
+It cannot make payments, move money, change anything at the bank, or see accounts you have not
+linked or exported. Categories and merchant names are only present when the data source supplies
+them (statement files supply neither).
+
+## 60-second quick start
+
+The lowest-friction way to see it work needs **no bank account, no sign-up and no credentials**: the
+`statement` provider reads CSV / OFX files from a folder, and the repository ships a small
+**synthetic** sample file (made-up data, see [examples/](examples/README.md)).
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+PowerShell:
+
+```powershell
+git clone https://github.com/pritch56/Nationwide-mcp.git
+cd Nationwide-mcp
+uv sync
+$env:NATIONWIDE_PROVIDER = "statement"
+$env:NATIONWIDE_STATEMENT_DIR = "examples/sample-statements"
+uv run nationwide-mcp-link check
+```
+
+bash:
+
+```bash
+git clone https://github.com/pritch56/Nationwide-mcp.git
+cd Nationwide-mcp
+uv sync
+export NATIONWIDE_PROVIDER=statement NATIONWIDE_STATEMENT_DIR=examples/sample-statements
+uv run nationwide-mcp-link check
+```
+
+`check` prints `"connected": true`, `"status": "FILES_LOADED"` and one account. Then add the server
+to your MCP client with the [configuration below](#mcp-client-configuration) and ask, for example,
+"list my Nationwide transactions between 2026-10-01 and 2026-10-31" (the sample rows are dated
+October 2026, so name the dates: the default window is the last 30 days).
+
+To use **your own data** the same way, download transactions from the Nationwide Internet Bank
+(CSV or OFX) into a folder outside this repository and point `NATIONWIDE_STATEMENT_DIR` at it. Read
+[Statement files](#statement-files) first: the CSV layout the parser expects has not been checked
+against a real export. For live data through an aggregator, see
+[Connecting your real accounts](#connecting-your-real-accounts).
+
+## MCP client configuration
+
+### Statement files (no credentials)
+
+The same block works in Claude Code (`.mcp.json` in your project) and Claude Desktop
+(`claude_desktop_config.json`). Replace both paths with absolute paths on your machine; on Windows
+write them with forward slashes, as in `C:/path/to/Nationwide-mcp`.
+
+```json
+{
+  "mcpServers": {
+    "nationwide": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/Nationwide-mcp", "nationwide-mcp"],
+      "env": {
+        "NATIONWIDE_PROVIDER": "statement",
+        "NATIONWIDE_STATEMENT_DIR": "/absolute/path/to/Nationwide-mcp/examples/sample-statements"
+      }
+    }
+  }
+}
+```
+
+Restart the client; the server appears as `nationwide` with four tools.
+
+### An aggregator (TrueLayer shown)
+
+Keep secrets out of client configuration files: reference environment variables.
+
+Claude Code, `.mcp.json` (it expands `${VAR}` from the environment Claude Code was started in):
+
+```json
+{
+  "mcpServers": {
+    "nationwide": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/Nationwide-mcp", "nationwide-mcp"],
+      "env": {
+        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
+        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
+      }
+    }
+  }
+}
+```
+
+Claude Desktop, `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "nationwide": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/Nationwide-mcp", "--env-file", ".env", "nationwide-mcp"],
+      "env": {
+        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
+        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
+      }
+    }
+  }
+}
+```
+
+If your client does not expand `${VAR}` placeholders, delete the `env` block and rely on the
+`--env-file .env` argument shown above (the `.env` file stays on your disk, outside the client
+configuration). On Windows write the path as `C:/path/to/Nationwide-mcp`.
+
+To set the variables for the session — PowerShell:
+
+```powershell
+$env:TRUELAYER_CLIENT_ID = "<client id>"
+$env:TRUELAYER_CLIENT_SECRET = Read-Host "TrueLayer client secret"
+```
+
+bash:
+
+```bash
+export TRUELAYER_CLIENT_ID="<client id>"
+read -rs TRUELAYER_CLIENT_SECRET && export TRUELAYER_CLIENT_SECRET
+```
+
+## Tools
+
+All four tools are read-only.
+
+| Tool | Returns |
+|---|---|
+| `get_connection_status()` | `connected` (bool), `consent_expires_at` (ISO 8601 UTC timestamp ending `Z`, or null), `days_remaining` (int or null), `warning` (string or null; set when fewer than 14 days remain or action is needed), plus `provider`, `status`, `needs_reauthorisation`, `message`. **Never raises** for provider, authentication, configuration or rate-limit problems: it returns `connected: false` with the bracketed error in `warning` |
+| `list_accounts()` | `{source, count, accounts:[{id, source, name, type, currency, institution, mask}]}`; `id` and `name` are always present; `type` is `current`, `savings`, `credit_card` or `other` |
+| `get_balance(account_id)` | `{account_id, source, currency, balance_minor, current_minor, available_minor, as_of, balances:[…]}`. `balance_minor` is the primary field; `current_minor` is the same value, kept for compatibility |
+| `list_transactions(account_id, since?, before?, include_pending=false)` | `{account_id, source, since, before, count, pending_supported, pending_excluded, earliest_pending_date, transactions:[…]}` |
+
+`list_transactions` details:
+
+- The window is half-open: `since <= date < before`. Defaults: `before` = tomorrow (Europe/London
+  date), `since` = `before` minus 30 days. The effective `since` and `before` are echoed back.
+- `since >= before`, an unparseable date, or a range longer than `NATIONWIDE_MAX_RANGE_DAYS`
+  (default 400) gives `[invalid_request]` before any request is sent upstream.
+- `pending_excluded` is the number of pending items in the window that were left out because
+  `include_pending` is false; `earliest_pending_date` is the date of the earliest pending item in the
+  window (or null); `pending_supported` is `false` when the data source cannot report pending items
+  at all (statement files; a bank without a pending endpoint).
+
+A transaction:
+
+```json
+{"id": "nationwide_3f2a9c…", "source": "nationwide", "account_id": "acc1", "date": "2026-10-05",
+ "amount_minor": -1234, "currency": "GBP", "description": "TESCO STORES 1234",
+ "merchant": "Tesco", "category": "Shopping > Groceries", "pending": false, "notes": null}
+```
+
+- `date` is a `YYYY-MM-DD` calendar date in **Europe/London** local time. Timestamps that carry a
+  UTC offset are converted, not truncated (`2026-06-30T23:30:00Z` is 1 July).
+- `amount_minor` is a signed integer in minor units (pence); **negative is money out**. Minor units
+  follow ISO 4217 (0 decimals for JPY, KRW and similar; 3 for BHD, KWD and similar).
+- Balances: positive is money you have; negative is overdrawn or, on a credit card, money owed.
+- `notes` is `null` when empty, never `""`.
+- `id` is deterministic. With TrueLayer it is a hash of the account id and
+  `normalised_provider_transaction_id` (or `provider_transaction_id`); TrueLayer's own
+  `transaction_id` is documented as unstable and is not used. Items without a durable id, and all
+  pending items, get a hash of account + date + amount + description + occurrence number.
+- If two *different* transactions arrive with the same provider id, both are kept: the first keeps
+  the normal id, each later one gets a content-derived id, and a warning is logged.
+- TrueLayer sign handling: account transactions arrive negative for money out (kept); card
+  transactions arrive positive for money out (inverted); a card's `current` balance arrives positive
+  when money is owed (inverted). `transaction_type` (DEBIT/CREDIT) wins when present.
+
+## Do not lose transactions: overlapping windows
+
+With pending items excluded (the default), a transaction that is **pending when you fetch and
+settles later** keeps its original date. A later fetch whose window starts *after* that date will
+never return it. Fetching back-to-back, non-overlapping windows (for example "since the last run")
+therefore **silently drops transactions**.
+
+Callers must:
+
+1. **Re-fetch an overlapping window every time.** Start at or before the `earliest_pending_date`
+   reported by the previous call. If you do not have one, or `pending_supported` is `false`, go back
+   at least **14 days**.
+2. **De-duplicate on `id`** (insert-or-update keyed on `id`).
+
+`pending_excluded` tells you how many items are waiting; when it is greater than zero the next fetch
+must reach back to `earliest_pending_date`. Pending items themselves (`include_pending=true`) can
+change `id` and amount when they settle, so do not store them as final.
 
 ## Providers
 
@@ -52,15 +257,29 @@ time and has not been verified by running this code. A dated comparison with sou
 [docs/research.md](docs/research.md). Transaction ids differ between providers, so use one provider
 for any given period.
 
-## Quick start
+### Comparison
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+What each route costs and whether it reaches Nationwide is taken from public pages read in October
+2026 ([docs/research.md](docs/research.md)); none of it was confirmed by opening an account. "Tested
+against" describes this project's own test suite.
+
+| Provider | Sign-up needed | Cost (as read, Oct 2026) | Reaches Nationwide? (as read, Oct 2026) | Pending items | Tested against |
+|---|---|---|---|---|---|
+| `statement` | None | Free | Yes, to the extent Nationwide offers a download for the account type | No (booked only) | Synthetic files only; CSV layout written from memory |
+| `truelayer` (default) | TrueLayer Console application in Live mode; availability to private individuals unconfirmed | No public price list found | `ob-nationwide` appeared in TrueLayer's public provider list | Yes, if the bank offers the endpoint | Mocked HTTP and a local fake server |
+| `lunchflow` | Paid consumer subscription and API key | Roughly US$2.92 per month billed yearly was advertised; indicative only | Not confirmed | As reported by Lunch Flow; not verified | Mocked HTTP |
+| `enablebanking` | Application and private key; free "restricted" mode for your own accounts | Free in restricted mode | Doubtful: no Nationwide entry was found | Depends on the bank; not verified | Mocked HTTP |
+
+## Connecting your real accounts
+
+Live data needs one of the aggregator providers and a `.env` file holding its settings
+(`.env.example` lists every variable). Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 PowerShell:
 
 ```powershell
-git clone https://github.com/pritch56/uk-bank-mcp.git
-cd uk-bank-mcp/nationwide
+git clone https://github.com/pritch56/Nationwide-mcp.git
+cd Nationwide-mcp
 uv sync
 Copy-Item .env.example .env      # then edit .env
 uv run --env-file .env nationwide-mcp-link check
@@ -69,8 +288,8 @@ uv run --env-file .env nationwide-mcp-link check
 bash:
 
 ```bash
-git clone https://github.com/pritch56/uk-bank-mcp.git
-cd uk-bank-mcp/nationwide
+git clone https://github.com/pritch56/Nationwide-mcp.git
+cd Nationwide-mcp
 uv sync
 cp .env.example .env             # then edit .env
 uv run --env-file .env nationwide-mcp-link check
@@ -79,9 +298,9 @@ uv run --env-file .env nationwide-mcp-link check
 `check` needs no credentials for the default provider: it looks Nationwide up in TrueLayer's public
 provider list.
 
-## Linking the bank
+### Linking the bank
 
-### TrueLayer (default)
+#### TrueLayer (default)
 
 1. Create an account and an application at <https://console.truelayer.com>.
 2. The application must be in **Live** mode to see real banks (Sandbox returns mock data only).
@@ -121,14 +340,14 @@ Other helper commands:
 | `nationwide-mcp-link reset` | Delete everything in the token store (also `--reset` on any command) |
 | `nationwide-mcp-link link --print-refresh-token` | Also print the refresh token. **This prints a secret** |
 
-### Lunch Flow
+#### Lunch Flow
 
 Sign up at <https://www.lunchflow.app>, connect Nationwide in its dashboard (stop if it is not
 offered), add an API destination, then set `NATIONWIDE_PROVIDER=lunchflow`, `LUNCHFLOW_API_KEY` and
 `LUNCHFLOW_CONNECTED_ON=<the date you connected>`. Run `nationwide-mcp-link check`. If spending
 shows as positive, set `LUNCHFLOW_INVERT_SIGN=1`.
 
-### Enable Banking
+#### Enable Banking
 
 Register an application at <https://enablebanking.com>. A newly registered production application
 starts in **restricted mode**: free, and limited to accounts that you link to the application
@@ -139,7 +358,7 @@ key (`.pem`), register an `https` redirect URL, then set `NATIONWIDE_PROVIDER=en
 `nationwide-mcp-link check` says whether Nationwide is offered to your application; if it is, run
 `nationwide-mcp-link link`.
 
-### Statement files
+#### Statement files
 
 In the Nationwide Internet Bank choose **Download transactions** (CSV or OFX), save the files into
 one folder and set `NATIONWIDE_PROVIDER=statement` and `NATIONWIDE_STATEMENT_DIR`. Overlapping
@@ -180,62 +399,6 @@ HTTP notes:
 - The transport is plain HTTP, stateless, with JSON responses. Put TLS in front of it.
 - Behind a reverse proxy or tunnel, list the public host names in `NATIONWIDE_MCP_ALLOWED_HOSTS`
   so that the `Host` header check accepts them.
-
-## MCP client configuration
-
-Keep secrets out of client configuration files: reference environment variables.
-
-Claude Code, `.mcp.json` (it expands `${VAR}` from the environment Claude Code was started in):
-
-```json
-{
-  "mcpServers": {
-    "nationwide": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/uk-bank-mcp/nationwide", "nationwide-mcp"],
-      "env": {
-        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
-        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
-      }
-    }
-  }
-}
-```
-
-Claude Desktop, `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "nationwide": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/uk-bank-mcp/nationwide", "--env-file", ".env", "nationwide-mcp"],
-      "env": {
-        "TRUELAYER_CLIENT_ID": "${TRUELAYER_CLIENT_ID}",
-        "TRUELAYER_CLIENT_SECRET": "${TRUELAYER_CLIENT_SECRET}"
-      }
-    }
-  }
-}
-```
-
-If your client does not expand `${VAR}` placeholders, delete the `env` block and rely on the
-`--env-file .env` argument shown above (the `.env` file stays on your disk, outside the client
-configuration). On Windows write the path as `C:/path/to/uk-bank-mcp/nationwide`.
-
-To set the variables for the session — PowerShell:
-
-```powershell
-$env:TRUELAYER_CLIENT_ID = "<client id>"
-$env:TRUELAYER_CLIENT_SECRET = Read-Host "TrueLayer client secret"
-```
-
-bash:
-
-```bash
-export TRUELAYER_CLIENT_ID="<client id>"
-read -rs TRUELAYER_CLIENT_SECRET && export TRUELAYER_CLIENT_SECRET
-```
 
 ## Configuration
 
@@ -314,118 +477,46 @@ Standard proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`) 
 are honoured by the HTTP library (httpx). On Windows the token-file ACL uses `USERNAME` /
 `USERDOMAIN`.
 
-## Tools
+## Disclaimer
 
-All four tools are read-only.
+- This project is **not affiliated with, endorsed by or supported by** Nationwide Building Society,
+  TrueLayer, Lunch Flow or Enable Banking. All trademarks belong to their owners.
+- It is provided **as is, without warranty of any kind**. It is not financial advice.
+- **You must register your own API client** with whichever provider you use and comply with that
+  provider's terms. Whether TrueLayer offers Live (real bank) access to private individuals is
+  **unconfirmed**: read the TrueLayer Console terms yourself. Enable Banking's free "restricted" mode
+  is for your own accounts only. Lunch Flow's terms have not been reviewed.
+- It is for **your own accounts only**. Do not host it for other people: giving third parties access
+  to bank data is a regulated activity in the UK.
 
-| Tool | Returns |
-|---|---|
-| `get_connection_status()` | `connected` (bool), `consent_expires_at` (ISO 8601 UTC timestamp ending `Z`, or null), `days_remaining` (int or null), `warning` (string or null; set when fewer than 14 days remain or action is needed), plus `provider`, `status`, `needs_reauthorisation`, `message`. **Never raises** for provider, authentication, configuration or rate-limit problems: it returns `connected: false` with the bracketed error in `warning` |
-| `list_accounts()` | `{source, count, accounts:[{id, source, name, type, currency, institution, mask}]}`; `id` and `name` are always present; `type` is `current`, `savings`, `credit_card` or `other` |
-| `get_balance(account_id)` | `{account_id, source, currency, balance_minor, current_minor, available_minor, as_of, balances:[…]}`. `balance_minor` is the primary field; `current_minor` is the same value, kept for compatibility |
-| `list_transactions(account_id, since?, before?, include_pending=false)` | `{account_id, source, since, before, count, pending_supported, pending_excluded, earliest_pending_date, transactions:[…]}` |
+## Security
 
-`list_transactions` details:
+- **Treat every text field as untrusted third-party input.** Descriptions, merchant names, notes,
+  account names and statement contents are written by merchants, payers and banks. They can contain
+  **prompt-injection text** aimed at the model reading them and **spreadsheet formulas**. Do not pair
+  this server with tools that run shell commands or send e-mail without human confirmation. Anything
+  that writes these values into a spreadsheet must neutralise cells beginning with `=`, `+`, `-` or
+  `@`.
+- **Token files are plaintext.** The file is written atomically with owner-only access: mode `0600`
+  on POSIX; on Windows inheritance is removed and the ACL is reduced to the current user with
+  `icacls` (if that fails a warning is logged and the file keeps its inherited permissions). Anyone
+  who can read the file, or your backups of it, can read your bank data until the consent ends.
+- **`--print-refresh-token` prints a secret** to your terminal and its scrollback.
+- **`NATIONWIDE_TOKEN_STORE=package.module:ClassName` imports and runs code named in the
+  environment.** Only set it to code you trust, and protect whatever sets your environment.
+- **HTTP transport** is plain HTTP with a single static bearer token. Put it behind TLS, always set
+  `NATIONWIDE_MCP_AUTH_TOKEN` (even on loopback: other local users and browser pages can reach
+  loopback ports), and do not expose it to the internet directly. `/healthz` is unauthenticated.
+- **Proxy variables are honoured** (`HTTPS_PROXY` and friends): a proxy set in the environment sees
+  the traffic's metadata, and a TLS-intercepting one sees the tokens.
+- Base-URL overrides are test hooks and must be `https://` (or loopback), so a typo cannot send
+  credentials over plain HTTP.
+- The statement importer reads only regular files that resolve inside `NATIONWIDE_STATEMENT_DIR`
+  (symlinks leading elsewhere are skipped) and caps file size.
+- Client secrets, tokens, API keys and private keys are never logged or put in error messages.
+  `.env`, `*.pem` and token files are git-ignored.
 
-- The window is half-open: `since <= date < before`. Defaults: `before` = tomorrow (Europe/London
-  date), `since` = `before` minus 30 days. The effective `since` and `before` are echoed back.
-- `since >= before`, an unparseable date, or a range longer than `NATIONWIDE_MAX_RANGE_DAYS`
-  (default 400) gives `[invalid_request]` before any request is sent upstream.
-- `pending_excluded` is the number of pending items in the window that were left out because
-  `include_pending` is false; `earliest_pending_date` is the date of the earliest pending item in the
-  window (or null); `pending_supported` is `false` when the data source cannot report pending items
-  at all (statement files; a bank without a pending endpoint).
-
-A transaction:
-
-```json
-{"id": "nationwide_3f2a9c…", "source": "nationwide", "account_id": "acc1", "date": "2026-10-05",
- "amount_minor": -1234, "currency": "GBP", "description": "TESCO STORES 1234",
- "merchant": "Tesco", "category": "Shopping > Groceries", "pending": false, "notes": null}
-```
-
-- `date` is a `YYYY-MM-DD` calendar date in **Europe/London** local time. Timestamps that carry a
-  UTC offset are converted, not truncated (`2026-06-30T23:30:00Z` is 1 July).
-- `amount_minor` is a signed integer in minor units (pence); **negative is money out**. Minor units
-  follow ISO 4217 (0 decimals for JPY, KRW and similar; 3 for BHD, KWD and similar).
-- Balances: positive is money you have; negative is overdrawn or, on a credit card, money owed.
-- `notes` is `null` when empty, never `""`.
-- `id` is deterministic. With TrueLayer it is a hash of the account id and
-  `normalised_provider_transaction_id` (or `provider_transaction_id`); TrueLayer's own
-  `transaction_id` is documented as unstable and is not used. Items without a durable id, and all
-  pending items, get a hash of account + date + amount + description + occurrence number.
-- If two *different* transactions arrive with the same provider id, both are kept: the first keeps
-  the normal id, each later one gets a content-derived id, and a warning is logged.
-- TrueLayer sign handling: account transactions arrive negative for money out (kept); card
-  transactions arrive positive for money out (inverted); a card's `current` balance arrives positive
-  when money is owed (inverted). `transaction_type` (DEBIT/CREDIT) wins when present.
-
-## Do not lose transactions: overlapping windows
-
-With pending items excluded (the default), a transaction that is **pending when you fetch and
-settles later** keeps its original date. A later fetch whose window starts *after* that date will
-never return it. Fetching back-to-back, non-overlapping windows (for example "since the last run")
-therefore **silently drops transactions**.
-
-Callers must:
-
-1. **Re-fetch an overlapping window every time.** Start at or before the `earliest_pending_date`
-   reported by the previous call. If you do not have one, or `pending_supported` is `false`, go back
-   at least **14 days**.
-2. **De-duplicate on `id`** (insert-or-update keyed on `id`).
-
-`pending_excluded` tells you how many items are waiting; when it is greater than zero the next fetch
-must reach back to `earliest_pending_date`. Pending items themselves (`include_pending=true`) can
-change `id` and amount when they settle, so do not store them as final.
-
-## Errors
-
-A failed tool call is an MCP tool error whose text contains a code in square brackets. The SDK
-prefixes the text with `Error executing tool <name>: `, so **match the bracketed code as a
-substring**, not at the start of the string. Rate-limit errors may end with
-`(retry_after_seconds=N)`.
-
-| Code | Meaning | What a caller should do |
-|---|---|---|
-| `[consent_expired]` | The bank consent expired or was revoked | Stop; a human must re-link |
-| `[not_connected]` | The bank was never linked (no token / session / files) | Stop; a human must link |
-| `[token_expired]` | A credential (access token, API key, signed JWT) was rejected | Stop; check the credential |
-| `[rate_limited]` | The aggregator or the bank refused the call | Wait (hours); never retried automatically; do not re-link |
-| `[sca_required]` | The bank wants fresh customer authentication (typically history older than about 90 days) | Ask for a more recent range |
-| `[invalid_request]` | Bad arguments: malformed id or date, inverted or over-long range | Fix the call |
-| `[account_not_found]` | Unknown account id | Call `list_accounts` |
-| `[provider_error]` | Any other upstream failure: timeout, 5xx, unsupported endpoint, malformed or non-JSON response | Retry later |
-| `[config_error]` | Missing or invalid configuration | Fix the environment |
-| `[token_store_error]` | The token store could not be read or written | Fix the store (permissions, disk) |
-| `[malformed_import_file]` | A statement file is too large, unreadable or not in a recognised layout | Fix or remove the file |
-| `[internal_error]` | A bug; details are in the server log only | Report it |
-
-HTTP 429 is never retried by this server. Network errors and 5xx responses from TrueLayer are
-retried twice with a short back-off.
-
-## Tokens (TrueLayer)
-
-TrueLayer issues an access token lasting about an hour and a long-lived refresh token, which it
-**may replace on any refresh** (rotation).
-
-- **The store always wins.** A token in the token store is used whatever the environment says. The
-  seed `NATIONWIDE_TRUELAYER_REFRESH_TOKEN` is read **only when the store is empty** (first start on
-  a new host). A stale seed left in the environment can therefore never override a freshly linked
-  token.
-- **To re-link**, run `nationwide-mcp-link link`: it overwrites the store. **To start again from a
-  seed**, clear the store first with `nationwide-mcp-link reset` (or delete the token file).
-- After a refresh the new tokens are kept in memory and used even if writing them to the store
-  fails. The write is retried on the next call, the superseded refresh token is never sent again,
-  and `get_connection_status` carries a `[token_store_error]` warning until the write succeeds. If
-  the process stops before then, the rotated token is lost and you must re-link.
-- One refresh runs at a time per process; a call that gets a 401 refreshes only if nobody else
-  already has.
-- Each bank is a separate TrueLayer connection with its own refresh token. If a token for another
-  bank is supplied by mistake the server answers `[config_error]` instead of presenting that bank's
-  data as Nationwide. Do not point two bank connections at the same token file.
-- The generic name `TRUELAYER_REFRESH_TOKEN` is not read.
-- Store options: `file` (default), `env` (read-only JSON in `NATIONWIDE_TOKEN_JSON`), `memory`, or
-  `package.module:ClassName` implementing `load() -> dict` and `save(dict)`.
+Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ## Limitations
 
@@ -499,34 +590,54 @@ Nothing below has been confirmed against a live service.
   memory of the format, not from a real export. OFX handling follows the generic OFX 1.x layout.
 - The sign conventions of a credit-card export and of an overdrawn balance.
 
-## Security
+## Errors
 
-- **Treat every text field as untrusted third-party input.** Descriptions, merchant names, notes,
-  account names and statement contents are written by merchants, payers and banks. They can contain
-  **prompt-injection text** aimed at the model reading them and **spreadsheet formulas**. Do not pair
-  this server with tools that run shell commands or send e-mail without human confirmation. Anything
-  that writes these values into a spreadsheet must neutralise cells beginning with `=`, `+`, `-` or
-  `@`.
-- **Token files are plaintext.** The file is written atomically with owner-only access: mode `0600`
-  on POSIX; on Windows inheritance is removed and the ACL is reduced to the current user with
-  `icacls` (if that fails a warning is logged and the file keeps its inherited permissions). Anyone
-  who can read the file, or your backups of it, can read your bank data until the consent ends.
-- **`--print-refresh-token` prints a secret** to your terminal and its scrollback.
-- **`NATIONWIDE_TOKEN_STORE=package.module:ClassName` imports and runs code named in the
-  environment.** Only set it to code you trust, and protect whatever sets your environment.
-- **HTTP transport** is plain HTTP with a single static bearer token. Put it behind TLS, always set
-  `NATIONWIDE_MCP_AUTH_TOKEN` (even on loopback: other local users and browser pages can reach
-  loopback ports), and do not expose it to the internet directly. `/healthz` is unauthenticated.
-- **Proxy variables are honoured** (`HTTPS_PROXY` and friends): a proxy set in the environment sees
-  the traffic's metadata, and a TLS-intercepting one sees the tokens.
-- Base-URL overrides are test hooks and must be `https://` (or loopback), so a typo cannot send
-  credentials over plain HTTP.
-- The statement importer reads only regular files that resolve inside `NATIONWIDE_STATEMENT_DIR`
-  (symlinks leading elsewhere are skipped) and caps file size.
-- Client secrets, tokens, API keys and private keys are never logged or put in error messages.
-  `.env`, `*.pem` and token files are git-ignored.
+A failed tool call is an MCP tool error whose text contains a code in square brackets. The SDK
+prefixes the text with `Error executing tool <name>: `, so **match the bracketed code as a
+substring**, not at the start of the string. Rate-limit errors may end with
+`(retry_after_seconds=N)`.
 
-Report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
+| Code | Meaning | What a caller should do |
+|---|---|---|
+| `[consent_expired]` | The bank consent expired or was revoked | Stop; a human must re-link |
+| `[not_connected]` | The bank was never linked (no token / session / files) | Stop; a human must link |
+| `[token_expired]` | A credential (access token, API key, signed JWT) was rejected | Stop; check the credential |
+| `[rate_limited]` | The aggregator or the bank refused the call | Wait (hours); never retried automatically; do not re-link |
+| `[sca_required]` | The bank wants fresh customer authentication (typically history older than about 90 days) | Ask for a more recent range |
+| `[invalid_request]` | Bad arguments: malformed id or date, inverted or over-long range | Fix the call |
+| `[account_not_found]` | Unknown account id | Call `list_accounts` |
+| `[provider_error]` | Any other upstream failure: timeout, 5xx, unsupported endpoint, malformed or non-JSON response | Retry later |
+| `[config_error]` | Missing or invalid configuration | Fix the environment |
+| `[token_store_error]` | The token store could not be read or written | Fix the store (permissions, disk) |
+| `[malformed_import_file]` | A statement file is too large, unreadable or not in a recognised layout | Fix or remove the file |
+| `[internal_error]` | A bug; details are in the server log only | Report it |
+
+HTTP 429 is never retried by this server. Network errors and 5xx responses from TrueLayer are
+retried twice with a short back-off.
+
+## Tokens (TrueLayer)
+
+TrueLayer issues an access token lasting about an hour and a long-lived refresh token, which it
+**may replace on any refresh** (rotation).
+
+- **The store always wins.** A token in the token store is used whatever the environment says. The
+  seed `NATIONWIDE_TRUELAYER_REFRESH_TOKEN` is read **only when the store is empty** (first start on
+  a new host). A stale seed left in the environment can therefore never override a freshly linked
+  token.
+- **To re-link**, run `nationwide-mcp-link link`: it overwrites the store. **To start again from a
+  seed**, clear the store first with `nationwide-mcp-link reset` (or delete the token file).
+- After a refresh the new tokens are kept in memory and used even if writing them to the store
+  fails. The write is retried on the next call, the superseded refresh token is never sent again,
+  and `get_connection_status` carries a `[token_store_error]` warning until the write succeeds. If
+  the process stops before then, the rotated token is lost and you must re-link.
+- One refresh runs at a time per process; a call that gets a 401 refreshes only if nobody else
+  already has.
+- Each bank is a separate TrueLayer connection with its own refresh token. If a token for another
+  bank is supplied by mistake the server answers `[config_error]` instead of presenting that bank's
+  data as Nationwide. Do not point two bank connections at the same token file.
+- The generic name `TRUELAYER_REFRESH_TOKEN` is not read.
+- Store options: `file` (default), `env` (read-only JSON in `NATIONWIDE_TOKEN_JSON`), `memory`, or
+  `package.module:ClassName` implementing `load() -> dict` and `save(dict)`.
 
 ## Troubleshooting
 
@@ -576,6 +687,7 @@ src/nationwide_mcp/
     statement.py       Nationwide CSV / OFX import
 tests/                 mocked HTTP per provider, MCP in-process, both transports end to end
 docs/research.md       dated notes on aggregators
+examples/              synthetic sample statement for the quick start
 ```
 
 ## Licence
