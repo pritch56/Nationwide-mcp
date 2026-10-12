@@ -1,0 +1,43 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artefacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Secrets and local configuration - never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+tokens.json
+.nationwide-mcp/
+
+# Real statement exports - never commit these (the synthetic sample in examples/ is the only exception)
+*.ofx
+*.qfx
+statements/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
